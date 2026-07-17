@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from telethon.errors import FloodWaitError
+from telethon.tl.functions.account import UpdateProfileRequest
 
 from backend.db import client as db_client
 
@@ -77,7 +78,7 @@ async def _cron_loop(client, owner_id: int, tz_str: str) -> None:
                 continue
 
             try:
-                await client.edit_profile(about=new_bio)
+                await client(UpdateProfileRequest(about=new_bio))
             except FloodWaitError as fwe:
                 logger.warning("Bio FloodWait %ds — sleeping.", fwe.seconds)
                 await asyncio.sleep(fwe.seconds + 1)
