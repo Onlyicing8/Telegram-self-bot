@@ -1,13 +1,18 @@
 """
 Save Engine
-  .save f  — Forward save: metadata log + forward to Saved Messages, no download.
-  .save d  — Deep save: download → validate → upload → DB record → cleanup.
+  .save f / .s f  — Forward save: metadata log + forward to Saved Messages, no download.
+  .save d / .s d  — Deep save: download → validate → upload → DB record → cleanup.
+
+Both the long (.save) and short (.s) aliases share one execution path.
 
 Safety guarantees:
   - Deep save enforces a hard size limit before any download is attempted.
   - BytesIO buffer is always closed in a finally block — zero memory leaks.
   - Empty-download guard rejects corrupted or zero-byte transfers.
   - Edit-first policy: every response edits the triggering message in-place.
+  - Media type is preserved: forward mode keeps the original Telegram media;
+    deep mode re-uploads with force_document=False for photos/videos so
+    Telegram reconstructs the native media type instead of a generic file.
 """
 import asyncio
 import io
@@ -15,7 +20,11 @@ import logging
 from datetime import datetime
 
 from telethon import events
-from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
+from telethon.tl.types import (
+    MessageMediaDocument,
+    MessageMediaPhoto,
+    DocumentAttributeFilename,
+)
 
 from backend.bot.handlers.guard import is_owner
 from backend.db import client as db_client
@@ -28,12 +37,25 @@ _MAX_DEEP_BYTES = 50 * 1024 * 1024
 _MEDIA_TYPE_MAP = {
     "image/jpeg": "Photo",
     "image/png": "Photo",
-    "image/gif": "GIF",
+    "image/gif": "Animation",
     "image/webp": "Sticker",
     "video/mp4": "Video",
+    "video/quicktime": "Video",
     "audio/mpeg": "Audio",
     "audio/ogg": "Voice",
+    "audio/mp4": "Audio",
     "application/pdf": "Document",
+}
+
+_MEDIA_ICON = {
+    "Photo": "📷",
+    "Video": "🎬",
+    "Animation": "🎞",
+    "Audio": "🎵",
+    "Voice": "🎤",
+    "Sticker": "🏷",
+    "Document": "📄",
+    "Unknown": "📦",
 }
 
 
@@ -43,6 +65,23 @@ def _detect_media_type(mime: str | None) -> str:
     return _MEDIA_TYPE_MAP.get(mime, "Document")
 
 
+def _media_icon(media_type: str | None) -> str:
+    return _MEDIA_ICON.get(media_type or "Unknown", "📦")
+
+
+def _extract_file_name(media) -> str | None:
+    """Extract the original filename from media attributes."""
+    if isinstance(media, MessageMediaDocument):
+        doc = media.document
+        for attr in getattr(doc, "attributes", []):
+            if isinstance(attr, DocumentAttributeFilename) and attr.file_name:
+                return attr.file_name
+            fn = getattr(attr, "file_name", None)
+            if fn:
+                return fn
+    return None
+
+
 def _build_tags(media_type: str, dt: datetime) -> list[str]:
     mt = media_type.lower().replace(" ", "_")
     return [
@@ -50,7 +89,7 @@ def _build_tags(media_type: str, dt: datetime) -> list[str]:
         f"#saved_{mt}",
         f"#saved_{dt.year}",
         f"#saved_{dt.year}_{dt.month:02d}",
-        f"#saved_{dt.year}_{dt.month:02d}_{dt.day:02d}",
+        f"#saved_{dt.year}_{dt.month:02d}_{dt.day}",
     ]
 
 
@@ -87,9 +126,28 @@ def _unwrap_forward(result) -> object | None:
     return result[0] if isinstance(result, list) else result
 
 
+def _build_confirmation(
+    save_code: str,
+    mode: str,
+    media_type: str,
+    file_name: str | None,
+) -> str:
+    icon = _media_icon(media_type)
+    mode_label = "Forward" if mode == "f" else "Deep"
+    lines = [
+        f"✅ **Saved**",
+        f"Code: `{save_code}`",
+        f"Mode: {mode_label}",
+        f"Type: {media_type}",
+    ]
+    if file_name:
+        lines.append(f"Name: `{file_name}`")
+    return "\n".join(lines)
+
+
 def register(client, owner_id: int, tz_str: str) -> None:
 
-    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.save (f|d)$"))
+    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(?:save|s) (f|d)$"))
     async def save_cmd(event) -> None:
         if not is_owner(event, owner_id):
             return
@@ -130,11 +188,7 @@ def register(client, owner_id: int, tz_str: str) -> None:
             doc = media.document
             mime_type = getattr(doc, "mime_type", None)
             file_size = getattr(doc, "size", None)
-            for attr in getattr(doc, "attributes", []):
-                fn = getattr(attr, "file_name", None)
-                if fn:
-                    file_name = fn
-                    break
+            file_name = _extract_file_name(media)
             file_id = str(getattr(doc, "id", ""))
         elif isinstance(media, MessageMediaPhoto):
             mime_type = "image/jpeg"
@@ -161,6 +215,7 @@ def register(client, owner_id: int, tz_str: str) -> None:
             try:
                 db_client.insert_save({
                     "save_code": save_code,
+                    "short_code": save_code,
                     "save_type": "forward",
                     "origin_chat_id": origin_chat_id,
                     "origin_msg_id": origin_msg_id,
@@ -172,6 +227,7 @@ def register(client, owner_id: int, tz_str: str) -> None:
                     "file_id": file_id,
                     "file_size": file_size,
                     "media_type": media_type,
+                    "file_name": file_name,
                     "tags": tags,
                     "caption": None,
                     "owner_id": owner_id,
@@ -180,10 +236,7 @@ def register(client, owner_id: int, tz_str: str) -> None:
             except Exception as exc:
                 logger.warning("save DB insert failed: %s", exc)
 
-            await event.edit(
-                f"📌 **Forward Saved** `{save_code}`\n"
-                f"📂 From: `{origin_chat_id}` / `{origin_msg_id}`"
-            )
+            await event.edit(_build_confirmation(save_code, mode, media_type, file_name))
 
         # ── Deep Save ─────────────────────────────────────────────────────
         else:
@@ -228,12 +281,17 @@ def register(client, owner_id: int, tz_str: str) -> None:
                 buf.seek(0)
                 buf.name = file_name or f"{save_code}.bin"
 
+                force_document = not (
+                    isinstance(media, MessageMediaPhoto)
+                    or (isinstance(media, MessageMediaDocument) and mime_type and mime_type.startswith("video/"))
+                )
+
                 try:
                     sent = await client.send_file(
                         "me",
                         buf,
                         caption=caption,
-                        force_document=isinstance(media, MessageMediaDocument),
+                        force_document=force_document,
                     )
                 except Exception as exc:
                     logger.error("deep save upload failed: %s", exc)
@@ -255,6 +313,7 @@ def register(client, owner_id: int, tz_str: str) -> None:
             try:
                 db_client.insert_save({
                     "save_code": save_code,
+                    "short_code": save_code,
                     "save_type": "deep",
                     "origin_chat_id": origin_chat_id,
                     "origin_msg_id": origin_msg_id,
@@ -266,6 +325,7 @@ def register(client, owner_id: int, tz_str: str) -> None:
                     "file_id": file_id,
                     "file_size": file_size,
                     "media_type": media_type,
+                    "file_name": file_name,
                     "tags": tags,
                     "caption": caption,
                     "owner_id": owner_id,
@@ -274,11 +334,7 @@ def register(client, owner_id: int, tz_str: str) -> None:
             except Exception as exc:
                 logger.warning("save DB insert failed: %s", exc)
 
-            await event.edit(
-                f"✅ **Deep Saved** `{save_code}`\n"
-                f"🖼 Type: {media_type} | 📦 Size: "
-                f"{f'{file_size / 1024:.1f} KB' if file_size else '—'}"
-            )
+            await event.edit(_build_confirmation(save_code, mode, media_type, file_name))
 
         await db_client.log(owner_id, "INFO", f"Saved {mode.upper()} {save_code}", {
             "save_code": save_code,

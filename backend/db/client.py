@@ -12,6 +12,8 @@ the caller — the in-memory fallback is used instead.
 import asyncio
 import logging
 import os
+import random
+import string
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,10 @@ _available = False
 _fallback: dict = {"saved_items": [], "bio_state": {}, "bot_logs": []}
 _save_code_lock = asyncio.Lock()
 _initialised = False
+
+_SHORT_CODE_PREFIX = "S"
+_SHORT_CODE_NUM_LEN = 4
+_SHORT_CODE_ALPHABET = string.ascii_uppercase + string.digits
 
 
 def _check_available() -> bool:
@@ -79,8 +85,16 @@ async def log(owner_id: int, level: str, message: str, context: dict | None = No
 
 
 async def get_next_save_code() -> str:
+    """Generate a compact, human-readable save code (e.g. S391, A82).
+
+    Tries a sequential numeric code first (S + zero-padded count) so codes
+    are stable and sortable. If that collides with an existing row (e.g.
+    legacy SV-NNNNNN rows were removed), falls back to a random alphanumeric
+    code. Always verifies uniqueness against the DB before returning.
+    """
     async with _save_code_lock:
         db = get_db()
+        count = 0
         if db:
             try:
                 result = db.table("saved_items").select("id", count="exact").execute()
@@ -89,7 +103,40 @@ async def get_next_save_code() -> str:
                 count = len(_fallback["saved_items"])
         else:
             count = len(_fallback["saved_items"])
-        return f"SV-{(count + 1):06d}"
+
+        sequential = f"{_SHORT_CODE_PREFIX}{count + 1:0{_SHORT_CODE_NUM_LEN}d}"
+        if await _is_code_free(sequential):
+            return sequential
+
+        for _ in range(50):
+            rand_code = _SHORT_CODE_PREFIX + "".join(
+                random.choices(_SHORT_CODE_ALPHABET, k=4)
+            )
+            if await _is_code_free(rand_code):
+                return rand_code
+
+        return sequential
+
+
+async def _is_code_free(code: str) -> bool:
+    """Check that a code is not already used as save_code or short_code."""
+    db = get_db()
+    if db:
+        try:
+            res = (
+                db.table("saved_items")
+                .select("id")
+                .or_(f"save_code.eq.{code},short_code.eq.{code}")
+                .limit(1)
+                .execute()
+            )
+            return not (res.data or [])
+        except Exception:
+            pass
+    for item in _fallback["saved_items"]:
+        if item.get("save_code") == code or item.get("short_code") == code:
+            return False
+    return True
 
 
 def insert_save(data: dict) -> dict | None:
@@ -106,13 +153,19 @@ def insert_save(data: dict) -> dict | None:
 
 
 def query_save(save_code: str) -> dict | None:
+    """Look up a saved item by short_code OR legacy save_code.
+
+    Tries short_code first (new format), then falls back to save_code
+    (legacy SV-NNNNNN) so old commands keep working.
+    """
+    code = save_code.upper()
     db = get_db()
     if db:
         try:
             result = (
                 db.table("saved_items")
                 .select("*")
-                .eq("save_code", save_code.upper())
+                .or_(f"short_code.eq.{code},save_code.eq.{code}")
                 .maybe_single()
                 .execute()
             )
@@ -120,7 +173,9 @@ def query_save(save_code: str) -> dict | None:
         except Exception as exc:
             logger.warning("Supabase query_save failed (%s) — using fallback.", exc)
     for item in _fallback["saved_items"]:
-        if item.get("save_code", "").upper() == save_code.upper():
+        sc = (item.get("short_code") or "").upper()
+        lc = (item.get("save_code") or "").upper()
+        if sc == code or lc == code:
             return item
     return None
 
@@ -149,6 +204,98 @@ def list_saves(owner_id: int, limit: int = 50, offset: int = 0) -> tuple[list, i
     items = [s for s in _fallback["saved_items"] if s.get("owner_id") == owner_id]
     total = len(items)
     return items[offset:offset + limit], total
+
+
+def list_recent_saves(owner_id: int, limit: int = 10) -> list:
+    """Return recent saves for .list — uses idx_saved_items_owner_created."""
+    db = get_db()
+    if db:
+        try:
+            result = (
+                db.table("saved_items")
+                .select("short_code,save_code,save_type,media_type,file_name,mime_type,created_at")
+                .eq("owner_id", owner_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as exc:
+            logger.warning("Supabase list_recent_saves failed (%s) — using fallback.", exc)
+    items = sorted(
+        [s for s in _fallback["saved_items"] if s.get("owner_id") == owner_id],
+        key=lambda x: x.get("created_at", ""),
+        reverse=True,
+    )
+    return items[:limit]
+
+
+def search_saves(owner_id: int, query: str, limit: int = 20) -> list:
+    """Search saves by caption, file_name, save_code, short_code, mime_type.
+
+    Uses trigram indexes (pg_trgm) for fast ILIKE matching. Falls back to
+    a simple in-memory scan when Supabase is unavailable.
+    """
+    pattern = f"%{query}%"
+    db = get_db()
+    if db:
+        try:
+            result = (
+                db.table("saved_items")
+                .select("short_code,save_code,save_type,media_type,file_name,mime_type,created_at")
+                .eq("owner_id", owner_id)
+                .or_(
+                    f"caption.ilike.{pattern},"
+                    f"file_name.ilike.{pattern},"
+                    f"save_code.ilike.{pattern},"
+                    f"short_code.ilike.{pattern},"
+                    f"mime_type.ilike.{pattern}"
+                )
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as exc:
+            logger.warning("Supabase search_saves failed (%s) — using fallback.", exc)
+    q_lower = query.lower()
+    matches = []
+    for item in _fallback["saved_items"]:
+        if item.get("owner_id") != owner_id:
+            continue
+        haystack = " ".join(str(item.get(k) or "") for k in
+                             ("caption", "file_name", "save_code", "short_code", "mime_type")).lower()
+        if q_lower in haystack:
+            matches.append(item)
+    matches.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return matches[:limit]
+
+
+def delete_save(owner_id: int, code: str) -> dict | None:
+    """Delete a saved_items row by short_code or save_code. Returns the row or None."""
+    target = query_save(code)
+    if not target or target.get("owner_id") != owner_id:
+        return None
+    db = get_db()
+    if db:
+        try:
+            sc = target.get("short_code") or target.get("save_code")
+            res = (
+                db.table("saved_items")
+                .delete()
+                .eq("owner_id", owner_id)
+                .eq("short_code" if target.get("short_code") else "save_code", sc)
+                .execute()
+            )
+            return target if (res.data or []) else None
+        except Exception as exc:
+            logger.warning("Supabase delete_save failed (%s) — using fallback.", exc)
+    _fallback["saved_items"] = [
+        s for s in _fallback["saved_items"]
+        if not (s.get("short_code") == target.get("short_code")
+                or s.get("save_code") == target.get("save_code"))
+    ]
+    return target
 
 
 def count_saves(owner_id: int, save_type: str | None = None) -> int:

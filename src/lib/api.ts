@@ -12,6 +12,7 @@ export interface SavedItem {
   file_id: string | null;
   file_size: number | null;
   media_type: string | null;
+  file_name: string | null;
   tags: string[];
   caption: string | null;
   owner_id: number;

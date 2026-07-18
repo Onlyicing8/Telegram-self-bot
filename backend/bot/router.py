@@ -6,7 +6,7 @@ registration, the error is logged and the remaining handlers still register.
 """
 import logging
 
-from backend.bot.handlers import misc, save, retrieve, delete, organize, bio
+from backend.bot.handlers import misc, save, retrieve, delete, organize, bio, discover
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ def register_all(client, owner_id: int, tz_str: str):
         ("delete", lambda: delete.register(client, owner_id)),
         ("organize", lambda: organize.register(client, owner_id)),
         ("bio", lambda: bio.register(client, owner_id, tz_str)),
+        ("discover", lambda: discover.register(client, owner_id)),
     ]
 
     for name, fn in handlers:

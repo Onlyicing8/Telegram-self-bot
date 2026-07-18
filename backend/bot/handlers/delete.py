@@ -1,6 +1,7 @@
 """
 .del <n>         — Delete the last n outgoing messages in this chat.
 .del id <msgid>  — Delete all messages from <msgid> forward in this chat.
+.del <code>      — Delete a saved item from the index (e.g. .del S391).
 
 Edit-first policy: error feedback edits the trigger message.
 Successful deletion silently removes all targeted messages (including the command).
@@ -8,6 +9,7 @@ Successful deletion silently removes all targeted messages (including the comman
 import logging
 from telethon import events
 from backend.bot.handlers.guard import is_owner
+from backend.db import client as db_client
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,10 @@ def register(client, owner_id: int):
             return
 
         arg = (event.pattern_match.group(1) or "").strip()
+
+        if not arg:
+            await event.edit("⚠️ Usage: `.del <n>` or `.del id <msgid>` or `.del <code>`")
+            return
 
         if arg.lower().startswith("id "):
             rest = arg[3:].strip()
@@ -60,4 +66,15 @@ def register(client, owner_id: int):
                 logger.error("del n failed: %s", exc)
 
         else:
-            await event.edit("⚠️ Usage: `.del <n>` or `.del id <msgid>`")
+            code = arg.upper()
+            try:
+                row = db_client.delete_save(owner_id, code)
+            except Exception as exc:
+                logger.error("del save_code failed: %s", exc)
+                await event.edit(f"❌ DB error: {exc}")
+                return
+            if not row:
+                await event.edit(f"❌ No saved item found for `{code}`")
+                return
+            display = row.get("short_code") or row.get("save_code") or code
+            await event.edit(f"🗑 Deleted saved item `{display}`")

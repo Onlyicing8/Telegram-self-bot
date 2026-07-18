@@ -8,9 +8,9 @@ interface Props {
 const TYPE_COLORS: Record<string, string> = {
   Photo: 'text-sky-400 bg-sky-400/10',
   Video: 'text-violet-400 bg-violet-400/10',
+  Animation: 'text-amber-400 bg-amber-400/10',
   Audio: 'text-emerald-400 bg-emerald-400/10',
   Voice: 'text-teal-400 bg-teal-400/10',
-  GIF: 'text-amber-400 bg-amber-400/10',
   Sticker: 'text-pink-400 bg-pink-400/10',
   Document: 'text-slate-400 bg-slate-400/10',
   Unknown: 'text-slate-500 bg-slate-500/10',
@@ -68,6 +68,11 @@ export default function SavedItems({ items, total }: Props) {
                   <span className="font-mono text-sm font-medium text-primary truncate">
                     {item.save_code}
                   </span>
+                  {item.file_name && (
+                    <span className="text-xs text-on-surface-variant truncate hidden sm:inline">
+                      {item.file_name}
+                    </span>
+                  )}
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     item.save_type === 'deep'
                       ? 'bg-emerald-500/10 text-emerald-400'
@@ -87,6 +92,12 @@ export default function SavedItems({ items, total }: Props) {
                 <div><span className="opacity-50">MIME</span> <span className="text-on-surface">{item.mime_type || '—'}</span></div>
                 <div><span className="opacity-50">Size</span> <span className="text-on-surface">{fmt(item.file_size)}</span></div>
               </div>
+
+              {item.file_name && (
+                <div className="mt-1.5 text-xs text-on-surface-variant">
+                  <span className="opacity-50">File</span> <span className="text-on-surface font-mono">{item.file_name}</span>
+                </div>
+              )}
 
               {item.tags && item.tags.length > 0 && (
                 <div className="mt-2.5 flex flex-wrap gap-1.5">

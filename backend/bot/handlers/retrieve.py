@@ -1,6 +1,8 @@
 """
-.preview <id>  — Show stored metadata for a saved item.
-.send <id>     — Forward the saved asset into the current chat.
+.preview <code> / .retrieve <code> / .r <code> — Show stored metadata for a saved item.
+.send <code>                                 — Forward the saved asset into the current chat.
+
+All three preview aliases share one execution path. No duplicated logic.
 """
 import logging
 from telethon import events
@@ -13,8 +15,9 @@ logger = logging.getLogger(__name__)
 def _format_preview(row: dict) -> str:
     size_str = f"{row['file_size'] / 1024:.1f} KB" if row.get("file_size") else "—"
     tags = " ".join(row.get("tags") or [])
+    code = row.get("short_code") or row.get("save_code") or "—"
     return (
-        f"**Save Code:** `{row['save_code']}`\n"
+        f"**Save Code:** `{code}`\n"
         f"**Type:** {row.get('save_type', '—').title()}\n"
         f"**Media:** {row.get('media_type', '—')}\n"
         f"**MIME:** `{row.get('mime_type') or '—'}`\n"
@@ -29,7 +32,7 @@ def _format_preview(row: dict) -> str:
 
 def register(client, owner_id: int):
 
-    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.preview\s+(\S+)$"))
+    @client.on(events.NewMessage(outgoing=True, pattern=r"^\.(?:preview|retrieve|r)\s+(\S+)$"))
     async def preview(event):
         if not is_owner(event, owner_id):
             return
