@@ -38,10 +38,10 @@ def render_bio(template: str, mood: str, text: str, tz_str: str) -> str:
     tz = _get_tz(tz_str)
     now = datetime.now(tz)
     return (
-        template
+        (template or "🕒 {time} | 💭 {mood}")
         .replace("{time}", now.strftime("%H:%M"))
-        .replace("{mood}", mood)
-        .replace("{text}", text)
+        .replace("{mood}", mood or "😊")
+        .replace("{text}", text or "")
     )
 
 
