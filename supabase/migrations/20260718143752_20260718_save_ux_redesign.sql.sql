@@ -54,17 +54,13 @@ ALTER TABLE saved_items
     ADD COLUMN IF NOT EXISTS file_name text,
     ADD COLUMN IF NOT EXISTS short_code text;
 
--- Unique constraint on short_code, allowing multiple NULLs (existing rows)
--- PostgreSQL treats NULLs as distinct, so existing NULL rows coexist.
 DROP INDEX IF EXISTS idx_saved_items_short_code;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_items_short_code
     ON saved_items (short_code) WHERE short_code IS NOT NULL;
 
--- Composite index for .list (owner + recent)
 CREATE INDEX IF NOT EXISTS idx_saved_items_owner_created
     ON saved_items (owner_id, created_at DESC);
 
--- Trigram indexes for fast .find search across text fields
 CREATE INDEX IF NOT EXISTS idx_saved_items_caption_trgm
     ON saved_items USING gin (caption gin_trgm_ops);
 

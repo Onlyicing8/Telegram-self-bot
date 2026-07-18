@@ -89,7 +89,7 @@ def _build_tags(media_type: str, dt: datetime) -> list[str]:
         f"#saved_{mt}",
         f"#saved_{dt.year}",
         f"#saved_{dt.year}_{dt.month:02d}",
-        f"#saved_{dt.year}_{dt.month:02d}_{dt.day:02d}",
+        f"#saved_{dt.year}_{dt.month:02d}_{dt.day}",
     ]
 
 
@@ -281,9 +281,6 @@ def register(client, owner_id: int, tz_str: str) -> None:
                 buf.seek(0)
                 buf.name = file_name or f"{save_code}.bin"
 
-                # Preserve native media type: photos and videos are sent as
-                # media (force_document=False) so Telegram reconstructs them
-                # as Photo/Video rather than generic documents.
                 force_document = not (
                     isinstance(media, MessageMediaPhoto)
                     or (isinstance(media, MessageMediaDocument) and mime_type and mime_type.startswith("video/"))

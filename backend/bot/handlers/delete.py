@@ -66,7 +66,6 @@ def register(client, owner_id: int):
                 logger.error("del n failed: %s", exc)
 
         else:
-            # Treat as a save code — delete from the saved_items index
             code = arg.upper()
             try:
                 row = db_client.delete_save(owner_id, code)

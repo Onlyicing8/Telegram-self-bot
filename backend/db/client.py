@@ -104,12 +104,10 @@ async def get_next_save_code() -> str:
         else:
             count = len(_fallback["saved_items"])
 
-        # Primary: sequential numeric code S0001..S9999 then S10000+
         sequential = f"{_SHORT_CODE_PREFIX}{count + 1:0{_SHORT_CODE_NUM_LEN}d}"
         if await _is_code_free(sequential):
             return sequential
 
-        # Fallback: random alphanumeric code (e.g. A82, X91, M401)
         for _ in range(50):
             rand_code = _SHORT_CODE_PREFIX + "".join(
                 random.choices(_SHORT_CODE_ALPHABET, k=4)
@@ -117,7 +115,6 @@ async def get_next_save_code() -> str:
             if await _is_code_free(rand_code):
                 return rand_code
 
-        # Extremely unlikely last resort
         return sequential
 
 
