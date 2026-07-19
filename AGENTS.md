@@ -820,7 +820,7 @@ network) is wrapped in error handling that degrades gracefully.
    is cooperative async. Telethon + Uvicorn + Bio cron all share one event
    loop.
 
-8. **Frontend polling** — 30-second interval, parallel fetchs. No
+8. **Frontend polling** — 30-second interval, parallel fetches. No
    websockets or SSE.
 
 9. **Auto-reconnect** — Telethon auto-reconnects with 5 retries, 2s delay.
