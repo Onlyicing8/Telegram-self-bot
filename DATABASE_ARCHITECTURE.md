@@ -4,8 +4,7 @@
 > This document contains everything needed to manually recreate the
 > entire Supabase project from scratch without reading source code.
 >
-> Repository: `https://github.com/Onlyicing3/Telegram-self-bot`
-> Branch HEAD: `141e963d8a5990cc43662b0391a56aa15a679a78`
+> Repository: Always push to the repository connected to the current workspace.
 
 ---
 

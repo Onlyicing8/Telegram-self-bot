@@ -58,6 +58,21 @@ _MEDIA_ICON = {
     "Unknown": "📦",
 }
 
+_MIME_EXT = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/mp4": ".m4a",
+    "application/pdf": ".pdf",
+    "application/zip": ".zip",
+    "application/vnd.android.package-archive": ".apk",
+}
+
 
 def _detect_media_type(mime: str | None) -> str:
     if not mime:
@@ -80,6 +95,14 @@ def _extract_file_name(media) -> str | None:
             if fn:
                 return fn
     return None
+
+
+def _generate_filename(media, mime_type: str | None, save_code: str) -> str:
+    """Generate a fallback filename with the correct extension."""
+    if isinstance(media, MessageMediaPhoto):
+        return f"photo_{save_code}.jpg"
+    ext = _MIME_EXT.get(mime_type or "", ".bin")
+    return f"{save_code}{ext}"
 
 
 def _build_tags(media_type: str, dt: datetime) -> list[str]:
@@ -198,6 +221,8 @@ def register(client, owner_id: int, tz_str: str) -> None:
             file_id = str(getattr(photo, "id", ""))
 
         media_type = _detect_media_type(mime_type)
+        if not file_name:
+            file_name = _generate_filename(media, mime_type, save_code)
         tags = _build_tags(media_type, now)
 
         # ── Forward Save ──────────────────────────────────────────────────
@@ -279,12 +304,9 @@ def register(client, owner_id: int, tz_str: str) -> None:
                     return
 
                 buf.seek(0)
-                buf.name = file_name or f"{save_code}.bin"
+                buf.name = file_name
 
-                force_document = not (
-                    isinstance(media, MessageMediaPhoto)
-                    or (isinstance(media, MessageMediaDocument) and mime_type and mime_type.startswith("video/"))
-                )
+                force_document = False
 
                 try:
                     sent = await client.send_file(

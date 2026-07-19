@@ -14,6 +14,14 @@ Shutdown sequence on SIGTERM / SIGINT:
   B. Uvicorn signalled to exit
   C. All remaining asyncio tasks cancelled + awaited (zero orphans)
   D. Telethon disconnected cleanly
+
+Reliability:
+  - Telethon is supervised: if run_until_disconnected() returns (connection
+    lost), the supervisor reconnects automatically.
+  - A watchdog pings Telegram every 60s; if the ping times out, the client
+    is force-disconnected so the supervisor can reconnect.
+  - Bio cron is supervised: if the cron loop exits unexpectedly, it restarts.
+  - No background coroutine may silently die.
 """
 import asyncio
 import logging
@@ -41,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 _uvicorn_server: uvicorn.Server | None = None
 
+_WATCHDOG_INTERVAL = 60
+_WATCHDOG_TIMEOUT = 15
+_RECONNECT_DELAY = 10
+
 
 async def _run_web(port: int) -> None:
     global _uvicorn_server
@@ -53,6 +65,65 @@ async def _run_web(port: int) -> None:
     )
     _uvicorn_server = uvicorn.Server(config)
     await _uvicorn_server.serve()
+
+
+async def _supervise_telethon(client, shutdown: asyncio.Event) -> None:
+    """Run run_until_disconnected() in a loop, reconnecting on exit."""
+    while not shutdown.is_set():
+        try:
+            await client.run_until_disconnected()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Telethon run_until_disconnected error: %s", exc)
+
+        if shutdown.is_set():
+            break
+
+        logger.warning("Telethon disconnected — reconnecting in %ds...", _RECONNECT_DELAY)
+        await asyncio.sleep(_RECONNECT_DELAY)
+        try:
+            await client.connect()
+            if not await client.is_user_authorized():
+                logger.error("Reconnect: session not authorized — will retry")
+                continue
+            logger.info("Telethon reconnected successfully")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Reconnect failed: %s — will retry in %ds", exc, _RECONNECT_DELAY)
+
+
+async def _watchdog(client, shutdown: asyncio.Event) -> None:
+    """Periodically check Telethon health; force-disconnect if stalled."""
+    while not shutdown.is_set():
+        try:
+            await asyncio.sleep(_WATCHDOG_INTERVAL)
+            if shutdown.is_set():
+                break
+            if not client.is_connected():
+                logger.warning("Watchdog: client not connected — skipping ping")
+                continue
+            try:
+                await asyncio.wait_for(client.get_me(), timeout=_WATCHDOG_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning("Watchdog: health check timed out — forcing disconnect")
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Watchdog: health check failed (%s) — forcing disconnect", exc)
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Watchdog error: %s", exc)
 
 
 async def main() -> None:
@@ -105,17 +176,18 @@ async def main() -> None:
     logger.info("[5/5] Starting web server on port %s", cfg["PORT"])
     web_task = asyncio.create_task(_run_web(cfg["PORT"]), name="lifeos-web")
 
-    # ── Main: run until Telethon disconnects OR shutdown signal ───────────
-    logger.info("LifeOS online.")
-    tg_task = asyncio.create_task(
-        client.run_until_disconnected(), name="lifeos-tg"
+    # ── Supervisors: Telethon + watchdog ───────────────────────────────────
+    tg_supervisor = asyncio.create_task(
+        _supervise_telethon(client, shutdown), name="lifeos-tg-supervisor"
     )
-    shutdown_task = asyncio.create_task(shutdown.wait(), name="lifeos-shutdown")
+    watchdog_task = asyncio.create_task(
+        _watchdog(client, shutdown), name="lifeos-watchdog"
+    )
 
-    await asyncio.wait(
-        {tg_task, shutdown_task},
-        return_when=asyncio.FIRST_COMPLETED,
-    )
+    logger.info("LifeOS online.")
+
+    # Wait for shutdown signal — supervisors keep the bot alive indefinitely
+    await shutdown.wait()
 
     # ── Shutdown A: bio cron ──────────────────────────────────────────────
     logger.info("Shutdown: stopping bio cron")
@@ -133,7 +205,7 @@ async def main() -> None:
         task.cancel()
     await asyncio.gather(*pending, return_exceptions=True)
 
-    # ── Shutdown D: Telethon ──────────────────────────────────────────────
+    # ── Shutdown D: Telethon ─────────────────────────────────────────────
     logger.info("Shutdown: disconnecting Telethon")
     try:
         await client.disconnect()

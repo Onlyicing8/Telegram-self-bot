@@ -7,6 +7,8 @@ Guarantees:
   has not changed since the last confirmed update.
 - FloodWaitError is caught and slept precisely; all other errors are
   logged as warnings so the loop never terminates on Telegram throttles.
+- API calls have a 30s timeout to prevent hangs on stalled connections.
+- The cron loop is supervised: if it exits unexpectedly, it restarts.
 - Only one updater task can exist at a time (start_cron is idempotent).
 - Timezone resolved via zoneinfo with UTC fallback — never crashes.
 """
@@ -23,6 +25,8 @@ from backend.db import client as db_client
 logger = logging.getLogger(__name__)
 
 _task: asyncio.Task | None = None
+_API_TIMEOUT = 30
+_RESTART_DELAY = 10
 
 
 def _get_tz(tz_str: str):
@@ -62,7 +66,6 @@ async def _cron_loop(client, owner_id: int, tz_str: str) -> None:
 
         try:
             state = db_client.get_bio_state(owner_id)
-            logger.info("Bio cron state: %r", state)
 
             if not state or not state.get("is_active"):
                 logger.info("Bio cron: is_active=False — stopping loop.")
@@ -71,21 +74,25 @@ async def _cron_loop(client, owner_id: int, tz_str: str) -> None:
             tmpl = state.get("template", "🕒 {time} | 💭 {mood}")
             mood = state.get("mood", "😊")
             ctxtxt = state.get("custom_text", "")
-            logger.info("Bio cron render args: template=%r mood=%r custom_text=%r", tmpl, mood, ctxtxt)
 
             new_bio = render_bio(tmpl, mood, ctxtxt, tz_str)
-            logger.info("Rendered bio: %r", new_bio)
 
             last_bio = state.get("last_bio")
-            logger.info("Comparing last_bio=%r new_bio=%r", last_bio, new_bio)
 
             if new_bio == (last_bio or ""):
-                logger.info("Skipping — bio unchanged since last update")
                 continue
 
-            logger.info("Calling UpdateProfileRequest")
             try:
-                await client(UpdateProfileRequest(about=new_bio))
+                await asyncio.wait_for(
+                    client(UpdateProfileRequest(about=new_bio)),
+                    timeout=_API_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Bio API call timed out (%ds) — will retry next minute",
+                    _API_TIMEOUT,
+                )
+                continue
             except FloodWaitError as fwe:
                 logger.warning("Bio FloodWait %ds — sleeping.", fwe.seconds)
                 await asyncio.sleep(fwe.seconds + 1)
@@ -99,13 +106,10 @@ async def _cron_loop(client, owner_id: int, tz_str: str) -> None:
                 )
                 continue
 
-            logger.info("Telegram bio updated successfully")
-
             db_client.update_bio_state(owner_id, {
                 "last_bio": new_bio,
                 "updated_at": datetime.now(tz).isoformat(),
             })
-            logger.info("DB bio_state updated with last_bio=%r", new_bio)
 
         except asyncio.CancelledError:
             logger.info("Bio cron cancelled.")
@@ -114,11 +118,28 @@ async def _cron_loop(client, owner_id: int, tz_str: str) -> None:
             logger.exception("Bio cron tick error (will retry next minute)")
 
 
+async def _supervised_cron(client, owner_id: int, tz_str: str) -> None:
+    """Supervisor: restarts _cron_loop if it exits unexpectedly."""
+    while True:
+        try:
+            await _cron_loop(client, owner_id, tz_str)
+            logger.info("Bio cron supervisor: loop exited normally.")
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Bio cron crashed unexpectedly — restarting in %ds: %s",
+                _RESTART_DELAY, exc,
+            )
+            await asyncio.sleep(_RESTART_DELAY)
+
+
 def start_cron(client, owner_id: int, tz_str: str) -> None:
     global _task
     if _task and not _task.done():
         return
-    _task = asyncio.create_task(_cron_loop(client, owner_id, tz_str))
+    _task = asyncio.create_task(_supervised_cron(client, owner_id, tz_str))
 
 
 def stop_cron() -> None:
