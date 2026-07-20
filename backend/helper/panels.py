@@ -36,21 +36,16 @@ Then from a self-bot command, the helper bot can send an inline message:
         )
 """
 import logging
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Any
 
 from telethon import events
 from telethon.tl.custom import Button
-from telethon.types import (
-    CallbackQuery,
-    Message,
-    MessageButtonCallback,
-)
 
 from backend.bot.handlers.guard import is_owner
 
 logger = logging.getLogger(__name__)
 
-PanelHandler = Callable[[CallbackQuery, str], Awaitable[None]]
+PanelHandler = Callable[[events.CallbackQuery.Event, str], Awaitable[None]]
 _panels: dict[str, PanelHandler] = {}
 
 
@@ -58,7 +53,7 @@ class InlinePanelBuilder:
     """Builds inline keyboard layouts for the helper bot."""
 
     def __init__(self):
-        self._rows: list[list[MessageButtonCallback]] = []
+        self._rows: list[list[Any]] = []
 
     def add_row(self, text: str, callback_data: str) -> "InlinePanelBuilder":
         """Add a single button row."""
@@ -76,7 +71,7 @@ class InlinePanelBuilder:
         self._rows.append([Button.url(text, url)])
         return self
 
-    def build(self) -> list[list[MessageButtonCallback]]:
+    def build(self) -> list[list[Any]]:
         """Return the keyboard layout for Telethon's ``buttons=`` parameter."""
         return self._rows
 
