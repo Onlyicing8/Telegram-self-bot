@@ -36,7 +36,7 @@ from backend.bot.client import build_client
 from backend.bot.router import register_all
 from backend.db import client as db_client
 from backend.helper.client import build_helper, disconnect_helper
-from backend.helper.panels import register_callback_handlers
+from backend.helper.panels import register_callback_handlers, register_inline_query
 from backend.health import (
     check_stale,
     increment_restart,
@@ -217,6 +217,7 @@ async def main() -> None:
             helper_client = await build_helper(cfg["BOT_TOKEN"])
             if helper_client is not None:
                 register_callback_handlers(helper_client, cfg["OWNER_ID"])
+                register_inline_query(helper_client)
                 logger.info("[3.5/5] Helper bot online — inline UI enabled")
         except Exception as exc:
             logger.warning("[3.5/5] Helper bot failed: %s — inline UI disabled", exc)
