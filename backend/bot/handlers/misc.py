@@ -404,8 +404,10 @@ async def _safe_edit(event, text: str) -> None:
 
 
 def register(client, owner_id: int):
+    print(f"[FORENSIC] misc.register() ENTERED: client_id={id(client)}, owner_id={owner_id}", flush=True)
 
     # ── .ping ──────────────────────────────────────────────────────────
+    print(f"[FORENSIC] misc.register: registering .ping", flush=True)
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\.ping$"))
     async def ping(event):
         if not is_owner(event, owner_id):
@@ -433,6 +435,7 @@ def register(client, owner_id: int):
             logger.warning("id_cmd failed: %s", exc)
 
     # ── .help — inline panel via Inline Mode ───────────────────────────
+    print(f"[FORENSIC] misc.register: registering .help", flush=True)
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\.help$"))
     async def help_cmd(event):
         if not is_owner(event, owner_id):
@@ -456,6 +459,7 @@ def register(client, owner_id: int):
     # prevent the .help handler from being registered. Wrapped in
     # try/except so any error is isolated and does not block subsequent
     # handler registrations (.health, .kill, .logs).
+    print(f"[FORENSIC] misc.register: registering inline builders", flush=True)
     try:
         _register_help_panel()
         register_inline_builder("help", _help_inline_builder)
@@ -466,6 +470,7 @@ def register(client, owner_id: int):
         logger.warning("[MISC] Inline builder registration failed: %s — inline panels disabled", exc)
 
     # ── .health — inline panel via Inline Mode ──────────────────────────
+    print(f"[FORENSIC] misc.register: registering .health", flush=True)
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\.health$"))
     async def health_cmd(event):
         if not is_owner(event, owner_id):
@@ -494,6 +499,7 @@ def register(client, owner_id: int):
                 pass
 
     # ── .kill — diagnostic snapshot + recovery ─────────────────────────
+    print(f"[FORENSIC] misc.register: registering .kill", flush=True)
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\.kill$"))
     async def kill_cmd(event):
         if not is_owner(event, owner_id):
@@ -534,6 +540,7 @@ def register(client, owner_id: int):
                 pass
 
     # ── .logs — diagnostic event viewer ────────────────────────────────
+    print(f"[FORENSIC] misc.register: registering .logs", flush=True)
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\.logs(?:\s+(.+))?$"))
     async def logs_cmd(event):
         if not is_owner(event, owner_id):
