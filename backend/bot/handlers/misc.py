@@ -464,6 +464,7 @@ def register(client, owner_id: int):
 
     # ── .help — inline panel via Inline Mode (INSTRUMENTED) ────────────
     logger.info("REGISTER_HELP: about to register .help handler on client id(%s)", id(client))
+    logger.info("REGISTER_HELP: about to register .help handler on client id(%s)", id(client))
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\.help$"))
     async def help_cmd(event):
         logger.info("HELP STEP 1 - .help handler entered (chat_id=%s, msg_id=%s)", event.chat_id, event.message.id)
