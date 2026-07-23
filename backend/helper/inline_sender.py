@@ -12,6 +12,7 @@ a panel is in "input" state (Type B commands).
 """
 import asyncio
 import logging
+import time
 
 from telethon import events
 
@@ -26,14 +27,26 @@ from backend.helper.input_state import (
 logger = logging.getLogger(__name__)
 
 
+def _now_ms() -> float:
+    return time.monotonic() * 1000.0
+
+
 async def send_inline_panel(self_client, chat_id: int, query: str) -> bool:
     """Trigger inline mode and auto-send the first result.
 
     Returns True on success, False on failure.
     """
+    t_enter = _now_ms()
+    logger.info("[TIMING] send_inline_panel ENTER: t=%.1fms, chat_id=%s, query='%s'", t_enter, chat_id, query)
     logger.info("HELP STEP 3 - send_inline_panel entered: chat_id=%s, query='%s'", chat_id, query)
+
+    t_before_trigger = _now_ms()
+    logger.info("[TIMING] send_inline_panel BEFORE trigger: elapsed=%.1fms", t_before_trigger - t_enter)
     result = await inline_engine.trigger(self_client, chat_id, query)
+    t_after_trigger = _now_ms()
+    logger.info("[TIMING] send_inline_panel AFTER trigger: elapsed=%.1fms, ok=%s", t_after_trigger - t_enter, result)
     logger.info("HELP STEP 3 - send_inline_panel: trigger() returned: ok=%s", result)
+
     if not result:
         logger.warning("HELP STEP 3 - send_inline_panel returning False — REASON: trigger() returned False, see HELP STEP 4+ logs for exact failure")
     return result
