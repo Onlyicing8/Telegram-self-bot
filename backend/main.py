@@ -32,7 +32,6 @@ import sys
 
 import uvicorn
 from telethon import events
-from telethon import events
 
 import backend.config as cfg_module
 from backend.bio import engine as bio_engine
@@ -252,27 +251,7 @@ async def main() -> None:
     set_telethon_connected(True)
 
     # ── Phase 3: Register command handlers (exactly once) ─────────────────
-    logger.info("GLOBAL AUDIT: client object id=%s", id(client))
-
-    # ── GLOBAL EVENT HANDLER — logs EVERY event BEFORE any pattern filter ──
-    @client.on(events.NewMessage())
-    async def _global_event_auditor(event):
-        try:
-            raw = event.raw_text or ""
-            outgoing = event.out
-            sender = event.sender_id
-            chat = event.chat_id
-            logger.info(
-                "GLOBAL EVENT: message=%r outgoing=%s sender=%s chat=%s client=id(%s)",
-                raw[:80], outgoing, sender, chat, id(client),
-            )
-        except Exception:
-            logger.exception("GLOBAL EVENT: audit handler itself failed")
-
-    logger.info("GLOBAL AUDIT: _global_event_auditor registered on client id(%s)", id(client))
-
     logger.info("[3/5] Registering command handlers")
-    logger.info("GLOBAL AUDIT: register_all() completed, client id(%s)", id(client))
     logger.info("GLOBAL AUDIT: client object id=%s", id(client))
 
     # ── GLOBAL EVENT HANDLER — logs EVERY event BEFORE any pattern filter ──
