@@ -231,30 +231,23 @@ async def main() -> None:
             pass
 
     # ── Phase 1: Database warm-up (optional) ──────────────────────────────
-    logger.info("[1/5] Database warm-up")
     db = db_client.get_db()
     if db:
         try:
             db.table("bot_logs").select("id").limit(1).execute()
-            logger.info("[1/5] Database OK")
         except Exception as exc:
-            logger.warning("[1/5] Database warm-up failed (%s) — continuing", exc)
-    else:
-        logger.info("[1/5] Using in-memory fallback — no database required")
+            logger.warning("Database warm-up failed (%s) — continuing", exc)
 
     # ── Phase 2: Telethon client ──────────────────────────────────────────
-    logger.info("[2/5] Connecting Telethon")
     client = await build_client(cfg["API_ID"], cfg["API_HASH"], cfg["SESSION_STRING"])
     set_telethon_connected(True)
 
     # ── Phase 3: Register command handlers (exactly once) ─────────────────
-    logger.info("[3/5] Registering command handlers")
     register_all(client, cfg["OWNER_ID"], cfg["TZ"])
 
     # ── Phase 3.5: Helper bot (optional — Inline Mode + callbacks) ────────
     helper_client = None
     if cfg.get("HELPER_BOT_ENABLED"):
-        logger.info("[3.5/5] Starting helper bot")
         try:
             helper_client = await build_helper(cfg["BOT_TOKEN"])
             if helper_client is not None:
@@ -264,32 +257,23 @@ async def main() -> None:
                 set_helper_username(get_bot_username())
                 set_owner_id(cfg["OWNER_ID"])
                 register_input_listener(client, cfg["OWNER_ID"])
-                logger.info("[3.5/5] Helper bot online — Inline Mode enabled")
         except Exception:
-            logger.exception("[3.5/5] Helper bot failed — inline UI disabled")
+            logger.exception("Helper bot failed — inline UI disabled")
             helper_client = None
-    else:
-        logger.info("[3.5/5] Helper bot: no BOT_TOKEN — inline UI disabled")
 
     # ── Phase 4: Resume bio cron if it was active before last restart ─────
-    logger.info("[4/5] Bio cron resume check")
     try:
         state = db_client.get_bio_state(cfg["OWNER_ID"])
         if state and state.get("is_active"):
             bio_engine.start_cron(client, cfg["OWNER_ID"], cfg["TZ"])
-            logger.info("[4/5] Bio cron resumed")
         elif cfg.get("BIO_UPDATE_ENABLED"):
             bio_engine.start_cron(client, cfg["OWNER_ID"], cfg["TZ"])
-            logger.info("[4/5] Bio cron started (BIO_UPDATE_ENABLED=true)")
-        else:
-            logger.info("[4/5] Bio cron not active — skipping")
         set_bio_cron_ok(bio_engine.is_running())
     except Exception as exc:
-        logger.warning("[4/5] Bio cron resume check failed: %s", exc)
+        logger.warning("Bio cron resume check failed: %s", exc)
         set_bio_cron_ok(False)
 
     # ── Phase 5: Web server (background, non-blocking) ────────────────────
-    logger.info("[5/5] Starting web server on port %s", cfg["PORT"])
     web_task = asyncio.create_task(_run_web(cfg["PORT"]), name="lifeos-web")
 
     # ── Supervisors: Telethon + watchdog + heartbeat ────────────────────────
@@ -309,8 +293,6 @@ async def main() -> None:
         helper_supervisor = asyncio.create_task(
             _supervise_helper(helper_client, shutdown), name="lifeos-helper-supervisor"
         )
-        logger.info("[3.5/5] Helper bot supervisor started")
-
     logger.info("LifeOS online.")
 
     # Wait for shutdown signal — supervisors keep the bot alive indefinitely

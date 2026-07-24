@@ -238,7 +238,7 @@ async def _bio_inline_builder(event, extra: str) -> list:
     builder.add_row("❓ Help", "action:bio_help")
     builder.add_row("Close", "panel:help:close")
     buttons = builder.build()
-    msg = types.InputBotInlineMessageTextAuto(
+    msg = types.InputBotInlineMessageText(
         message=text,
         reply_markup=types.ReplyInlineMarkup(rows=buttons) if buttons else None,
     )

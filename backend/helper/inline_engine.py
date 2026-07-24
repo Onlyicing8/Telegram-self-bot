@@ -174,7 +174,7 @@ def register_inline_handler(helper_client, owner_id: int) -> None:
 
         # ── Parse query ──
         trace_collector.trace("BEFORE PARSE_QUERY")
-        raw_query = event.query.strip()
+        raw_query = event.text.strip()
         if not raw_query:
             trace_collector.trace("AFTER PARSE_QUERY: empty query")
             try:
@@ -241,7 +241,7 @@ def make_result(
 ) -> types.InputBotInlineResult:
     """Build a single InputBotInlineResult with a text message and buttons.
 
-    The result body is a InputBotInlineMessageTextAuto (auto-detected type).
+    The result body is a InputBotInlineMessageText (auto-detected type).
     """
     body_text = title
     if description:
@@ -250,7 +250,7 @@ def make_result(
     if buttons is None:
         buttons = []
 
-    msg = types.InputBotInlineMessageTextAuto(
+    msg = types.InputBotInlineMessageText(
         message=body_text,
         reply_markup=types.ReplyInlineMarkup(rows=buttons) if buttons else None,
     )
